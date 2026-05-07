@@ -57,9 +57,28 @@ export const Timer = () => {
     });
   };
 
-  const handleStop = () => {
+  const handleStop = async () => {
     if (!localSession) return;
     
+    // Save to Supabase
+    if (useStore.getState().user) {
+      const { user } = useStore.getState();
+      const durationSeconds = Math.floor((Date.now() - localSession.startTime) / 1000);
+      
+      if (durationSeconds > 10) {
+        try {
+          await supabase.from('Sessions').insert([{
+            user_id: user?.id,
+            topic: localSession.topic,
+            timer_type: localSession.type,
+            duration_seconds: durationSeconds
+          }]);
+        } catch (e) {
+          console.error('Error saving session:', e);
+        }
+      }
+    }
+
     // Broadcast stop
     socket.emit('stop_timer');
     setLocalSession(null);
@@ -80,23 +99,6 @@ export const Timer = () => {
         body: `You finished your ${localSession?.topic} session!`,
         icon: '/favicon.svg'
       });
-    }
-
-    // Save to Supabase
-    if (localSession && useStore.getState().user) {
-      const { user } = useStore.getState();
-      const durationSeconds = Math.floor((Date.now() - localSession.startTime) / 1000);
-      
-      try {
-        await supabase.from('Sessions').insert([{
-          user_id: user?.id,
-          topic: localSession.topic,
-          timer_type: localSession.type,
-          duration_seconds: durationSeconds
-        }]);
-      } catch (e) {
-        console.error('Error saving session:', e);
-      }
     }
 
     handleStop();
