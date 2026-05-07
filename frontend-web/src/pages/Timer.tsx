@@ -5,12 +5,13 @@ import { socket } from '../lib/socket';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 
-const POMODORO_DURATION = 25 * 60; // 25 minutes
+
 
 export const Timer = () => {
   const { localSession, setLocalSession } = useStore();
   const [topic, setTopic] = useState('');
   const [type, setType] = useState<TimerType>('POMODORO');
+  const [customMinutes, setCustomMinutes] = useState(25);
   const [elapsed, setElapsed] = useState(0);
   const navigate = useNavigate();
 
@@ -25,7 +26,9 @@ export const Timer = () => {
 
       // Check if Pomodoro ended
       if (localSession.type === 'POMODORO' && localSession.targetDuration) {
-        if (diff >= localSession.targetDuration) {
+        if (diff >= localSession.targetDuration && localSession.isActive) {
+          clearInterval(interval);
+          setLocalSession({ ...localSession, isActive: false });
           handleComplete();
         }
       }
@@ -41,7 +44,7 @@ export const Timer = () => {
       topic,
       type,
       startTime: Date.now(),
-      targetDuration: type === 'POMODORO' ? POMODORO_DURATION : undefined,
+      targetDuration: type === 'POMODORO' ? customMinutes * 60 : undefined,
       isActive: true,
     };
     
@@ -157,7 +160,7 @@ export const Timer = () => {
                   color: type === 'POMODORO' ? 'white' : 'var(--text-secondary)'
                 }}
               >
-                Pomodoro (25m)
+                Timer
               </button>
               <button 
                 onClick={() => setType('STOPWATCH')}
@@ -172,6 +175,20 @@ export const Timer = () => {
               </button>
             </div>
 
+            {type === 'POMODORO' && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+                <label style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Duration (minutes)</label>
+                <input 
+                  type="number" 
+                  min="1"
+                  max="1440"
+                  value={customMinutes}
+                  onChange={(e) => setCustomMinutes(Math.max(1, parseInt(e.target.value) || 1))}
+                  style={{ width: '100px', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'white', outline: 'none', textAlign: 'center' }}
+                />
+              </div>
+            )}
+
             <button 
               onClick={handleStart}
               disabled={!topic}
@@ -184,7 +201,7 @@ export const Timer = () => {
         ) : (
           <div>
             <h3 style={{ color: 'var(--accent-light)', textTransform: 'uppercase', letterSpacing: '2px', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
-              {localSession.type}
+              {localSession.type === 'POMODORO' ? 'TIMER' : localSession.type}
             </h3>
             <div style={{ fontSize: '1.25rem', marginBottom: '2rem' }}>
               {localSession.topic}
