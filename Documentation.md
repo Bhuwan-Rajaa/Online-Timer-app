@@ -157,4 +157,4 @@ React Native suspends JavaScript when the app is minimized. The architecture mus
 
 ### 5.3. Backend Deployment
 * **Database:** Supabase Free Tier.
-* **Real-time Server:** Render/Railway Free Tier. Connect to GitHub for automatic CI/CD.
+* **Real-time Server:** Render/Railway Free Tier. Connect to GitHub for automatic CI/CD.ī

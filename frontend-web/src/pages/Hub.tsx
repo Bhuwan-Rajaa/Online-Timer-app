@@ -3,6 +3,7 @@ import { useNetworkStore } from '../store/useNetworkStore';
 import { useStore } from '../store/useStore';
 import { useNavigate } from 'react-router-dom';
 import { socket } from '../lib/socket';
+import { supabase } from '../lib/supabase';
 
 export const Hub = () => {
   const { profile } = useStore();
@@ -11,6 +12,87 @@ export const Hub = () => {
   const navigate = useNavigate();
 
   const [messageInput, setMessageInput] = useState<Record<string, string>>({});
+  const [friendUsername, setFriendUsername] = useState('');
+  const [addFriendMessage, setAddFriendMessage] = useState('');
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+
+  const fetchPendingRequests = async () => {
+    if (!profile) return;
+    const { data: requests } = await supabase
+      .from('Friendships')
+      .select('user_id_1, user_id_2')
+      .eq('status', 'PENDING')
+      .or(`user_id_1.eq.${profile.id},user_id_2.eq.${profile.id}`);
+      
+    if (requests && requests.length > 0) {
+      const otherIds = requests.map(r => r.user_id_1 === profile.id ? r.user_id_2 : r.user_id_1);
+      const { data: profiles } = await supabase
+        .from('Profiles')
+        .select('id, username')
+        .in('id', otherIds);
+      if (profiles) setPendingRequests(profiles);
+    } else {
+      setPendingRequests([]);
+    }
+  };
+
+  useEffect(() => {
+    fetchPendingRequests();
+  }, [profile]);
+
+  const handleAddFriend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!friendUsername || !profile) return;
+    setAddFriendMessage('Sending...');
+    try {
+      const { data: users, error: userError } = await supabase
+        .from('Profiles')
+        .select('id')
+        .eq('username', friendUsername);
+      
+      if (userError || !users || users.length === 0) {
+        setAddFriendMessage('User not found.');
+        return;
+      }
+      
+      const friendId = users[0].id;
+      if (friendId === profile.id) {
+        setAddFriendMessage('You cannot add yourself.');
+        return;
+      }
+      
+      const isFirst = profile.id < friendId;
+      const user_id_1 = isFirst ? profile.id : friendId;
+      const user_id_2 = isFirst ? friendId : profile.id;
+      
+      const { error: insertError } = await supabase
+        .from('Friendships')
+        .insert({ user_id_1, user_id_2, status: 'PENDING' });
+        
+      if (insertError) {
+        setAddFriendMessage(insertError.code === '23505' ? 'Request already exists.' : 'Error sending request.');
+      } else {
+        setAddFriendMessage('Request sent!');
+        setFriendUsername('');
+      }
+    } catch (e) {
+      setAddFriendMessage('An error occurred.');
+    }
+  };
+
+  const handleAcceptRequest = async (friendId: string) => {
+    if (!profile) return;
+    const isFirst = profile.id < friendId;
+    const user_id_1 = isFirst ? profile.id : friendId;
+    const user_id_2 = isFirst ? friendId : profile.id;
+
+    await supabase
+      .from('Friendships')
+      .update({ status: 'ACCEPTED' })
+      .match({ user_id_1, user_id_2 });
+      
+    window.location.reload(); 
+  };
 
   const handleNudge = (targetUserId: string) => {
     socket.emit('send_nudge', { target_user_id: targetUserId });
@@ -65,6 +147,44 @@ export const Hub = () => {
             Initialize Timer
           </button>
         </div>
+
+        {/* Add Friend Card */}
+        <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>Add Friend</h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Connect with a study partner.</p>
+          </div>
+          <form onSubmit={handleAddFriend} style={{ marginTop: '1rem' }}>
+            <input
+              type="text"
+              placeholder="Username"
+              value={friendUsername}
+              onChange={(e) => setFriendUsername(e.target.value)}
+              style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'white', outline: 'none', marginBottom: '0.5rem' }}
+            />
+            <button type="submit" className="glass-button" style={{ width: '100%', padding: '0.5rem' }} disabled={!friendUsername}>
+              Send Request
+            </button>
+            {addFriendMessage && <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--accent-primary)', textAlign: 'center' }}>{addFriendMessage}</div>}
+          </form>
+        </div>
+
+        {/* Pending Requests Cards */}
+        {pendingRequests.map(req => (
+          <div key={req.id} className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid var(--accent-primary)' }}>
+            <div>
+              <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: 'var(--accent-light)' }}>Friend Request</h3>
+              <p style={{ fontWeight: 'bold' }}>@{req.username}</p>
+            </div>
+            <button 
+              onClick={() => handleAcceptRequest(req.id)}
+              className="glass-button" 
+              style={{ marginTop: '1rem', width: '100%', background: 'var(--accent-primary)' }}
+            >
+              Accept
+            </button>
+          </div>
+        ))}
 
         {/* Friend Cards */}
         {friendsList.length === 0 && (

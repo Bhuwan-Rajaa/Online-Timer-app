@@ -58,10 +58,38 @@ export const useSocket = () => {
     };
 
     const fetchFriendsAndJoin = async () => {
-      // In a real app, you would query the Friendships table here.
-      // For now, we'll just join with an empty array or handle it simply.
-      // E.g., const { data } = await supabase.from('Friendships')...
-      socket.emit('join_network', []);
+      try {
+        const { data: friendships } = await supabase
+          .from('Friendships')
+          .select('user_id_1, user_id_2')
+          .eq('status', 'ACCEPTED');
+
+        if (!friendships || friendships.length === 0) {
+          socket.emit('join_network', []);
+          return;
+        }
+
+        const friendIds = friendships.map(f => 
+          f.user_id_1 === user.id ? f.user_id_2 : f.user_id_1
+        );
+
+        const { data: profiles } = await supabase
+          .from('Profiles')
+          .select('id, username')
+          .in('id', friendIds);
+
+        if (profiles) {
+          const friendsList = profiles.map(p => ({
+            id: p.id,
+            username: p.username,
+            isOnline: false
+          }));
+          useNetworkStore.getState().setFriends(friendsList);
+          socket.emit('join_network', profiles.map(p => p.id));
+        }
+      } catch (e) {
+        console.error('Failed to fetch friends:', e);
+      }
     };
 
     initSocket();
