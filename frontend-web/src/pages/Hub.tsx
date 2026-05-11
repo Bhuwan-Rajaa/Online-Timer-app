@@ -6,7 +6,7 @@ import { socket } from '../lib/socket';
 import { supabase } from '../lib/supabase';
 
 export const Hub = () => {
-  const { profile } = useStore();
+  const { profile, user } = useStore();
   const { friends, messages, removeMessage } = useNetworkStore();
   const friendsList = Object.values(friends);
   const navigate = useNavigate();
@@ -14,41 +14,86 @@ export const Hub = () => {
   const [messageInput, setMessageInput] = useState<Record<string, string>>({});
   const [friendUsername, setFriendUsername] = useState('');
   const [addFriendMessage, setAddFriendMessage] = useState('');
-  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]); // incoming
+  const [outgoingRequests, setOutgoingRequests] = useState<any[]>([]); // sent by me
+
+  const userId = user?.id;
 
   const fetchPendingRequests = async () => {
-    if (!profile) return;
-    const { data: requests } = await supabase
-      .from('Friendships')
-      .select('user_id_1, user_id_2')
-      .eq('status', 'PENDING')
-      .or(`user_id_1.eq.${profile.id},user_id_2.eq.${profile.id}`);
+    if (!userId) return;
+    
+    try {
+      const { data: requests, error } = await supabase
+        .from('Friendships')
+        .select('user_id_1, user_id_2, requested_by')
+        .eq('status', 'PENDING')
+        .or(`user_id_1.eq.${userId},user_id_2.eq.${userId}`);
       
-    if (requests && requests.length > 0) {
-      const otherIds = requests.map(r => r.user_id_1 === profile.id ? r.user_id_2 : r.user_id_1);
-      const { data: profiles } = await supabase
-        .from('Profiles')
-        .select('id, username')
-        .in('id', otherIds);
-      if (profiles) setPendingRequests(profiles);
-    } else {
+      if (error) {
+        console.error('Error fetching pending requests:', error);
+        return;
+      }
+      
+      if (!requests || requests.length === 0) {
+        setPendingRequests([]);
+        setOutgoingRequests([]);
+        return;
+      }
+
+      // Separate incoming (others sent to me) vs outgoing (I sent)
+      const incomingIds: string[] = [];
+      const outgoingIds: string[] = [];
+
+      requests.forEach(r => {
+        const otherId = r.user_id_1 === userId ? r.user_id_2 : r.user_id_1;
+        if (r.requested_by === userId) {
+          outgoingIds.push(otherId); // I sent this request
+        } else {
+          incomingIds.push(otherId); // Someone sent this to me
+        }
+      });
+
+      // Fetch profiles for incoming requests
+      if (incomingIds.length > 0) {
+        const { data: incomingProfiles } = await supabase
+          .from('Profiles')
+          .select('id, username')
+          .in('id', incomingIds);
+        setPendingRequests(incomingProfiles || []);
+      } else {
+        setPendingRequests([]);
+      }
+
+      // Fetch profiles for outgoing requests
+      if (outgoingIds.length > 0) {
+        const { data: outgoingProfiles } = await supabase
+          .from('Profiles')
+          .select('id, username')
+          .in('id', outgoingIds);
+        setOutgoingRequests(outgoingProfiles || []);
+      } else {
+        setOutgoingRequests([]);
+      }
+    } catch (e) {
+      console.error('Failed to fetch pending requests:', e);
       setPendingRequests([]);
+      setOutgoingRequests([]);
     }
   };
 
   useEffect(() => {
     fetchPendingRequests();
-  }, [profile]);
+  }, [userId]);
 
   const handleAddFriend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!friendUsername || !profile) return;
+    if (!friendUsername.trim() || !userId) return;
     setAddFriendMessage('Sending...');
     try {
       const { data: users, error: userError } = await supabase
         .from('Profiles')
         .select('id')
-        .eq('username', friendUsername);
+        .eq('username', friendUsername.trim());
       
       if (userError || !users || users.length === 0) {
         setAddFriendMessage('User not found.');
@@ -56,42 +101,63 @@ export const Hub = () => {
       }
       
       const friendId = users[0].id;
-      if (friendId === profile.id) {
+      if (friendId === userId) {
         setAddFriendMessage('You cannot add yourself.');
         return;
       }
       
-      const isFirst = profile.id < friendId;
-      const user_id_1 = isFirst ? profile.id : friendId;
-      const user_id_2 = isFirst ? friendId : profile.id;
+      // Ensure user_id_1 < user_id_2 as per the CHECK constraint
+      const isFirst = userId < friendId;
+      const user_id_1 = isFirst ? userId : friendId;
+      const user_id_2 = isFirst ? friendId : userId;
       
       const { error: insertError } = await supabase
         .from('Friendships')
-        .insert({ user_id_1, user_id_2, status: 'PENDING' });
+        .insert({ user_id_1, user_id_2, status: 'PENDING', requested_by: userId });
         
       if (insertError) {
-        setAddFriendMessage(insertError.code === '23505' ? 'Request already exists.' : 'Error sending request.');
+        if (insertError.code === '23505') {
+          setAddFriendMessage('Request already exists or you are already friends.');
+        } else {
+          console.error('Insert friendship error:', insertError);
+          setAddFriendMessage('Error sending request. Check console for details.');
+        }
       } else {
         setAddFriendMessage('Request sent!');
         setFriendUsername('');
+        fetchPendingRequests();
       }
     } catch (e) {
+      console.error('Add friend error:', e);
       setAddFriendMessage('An error occurred.');
     }
   };
 
   const handleAcceptRequest = async (friendId: string) => {
-    if (!profile) return;
-    const isFirst = profile.id < friendId;
-    const user_id_1 = isFirst ? profile.id : friendId;
-    const user_id_2 = isFirst ? friendId : profile.id;
+    if (!userId) return;
+    const isFirst = userId < friendId;
+    const user_id_1 = isFirst ? userId : friendId;
+    const user_id_2 = isFirst ? friendId : userId;
 
-    await supabase
+    const { error } = await supabase
       .from('Friendships')
       .update({ status: 'ACCEPTED' })
       .match({ user_id_1, user_id_2 });
-      
-    window.location.reload(); 
+    
+    if (error) {
+      console.error('Accept request error:', error);
+      return;
+    }
+    
+    // Refresh the pending requests and re-fetch friends list
+    fetchPendingRequests();
+    // Trigger a reconnect to refresh friend network
+    if (socket.connected) {
+      socket.disconnect();
+      setTimeout(() => socket.connect(), 500);
+    } else {
+      window.location.reload();
+    }
   };
 
   const handleNudge = (targetUserId: string) => {
@@ -162,19 +228,20 @@ export const Hub = () => {
               onChange={(e) => setFriendUsername(e.target.value)}
               style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'white', outline: 'none', marginBottom: '0.5rem' }}
             />
-            <button type="submit" className="glass-button" style={{ width: '100%', padding: '0.5rem' }} disabled={!friendUsername}>
+            <button type="submit" className="glass-button" style={{ width: '100%', padding: '0.5rem' }} disabled={!friendUsername.trim()}>
               Send Request
             </button>
             {addFriendMessage && <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--accent-primary)', textAlign: 'center' }}>{addFriendMessage}</div>}
           </form>
         </div>
 
-        {/* Pending Requests Cards */}
+        {/* Incoming Pending Requests (others sent to me) */}
         {pendingRequests.map(req => (
           <div key={req.id} className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid var(--accent-primary)' }}>
             <div>
-              <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: 'var(--accent-light)' }}>Friend Request</h3>
+              <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: 'var(--accent-light)' }}>⬇ Incoming Request</h3>
               <p style={{ fontWeight: 'bold' }}>@{req.username}</p>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>wants to connect</p>
             </div>
             <button 
               onClick={() => handleAcceptRequest(req.id)}
@@ -186,10 +253,21 @@ export const Hub = () => {
           </div>
         ))}
 
-        {/* Friend Cards */}
-        {friendsList.length === 0 && (
+        {/* Outgoing Pending Requests (I sent these) */}
+        {outgoingRequests.map(req => (
+          <div key={req.id} className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid rgba(255,255,255,0.1)', opacity: 0.7 }}>
+            <div>
+              <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>⬆ Pending Sent</h3>
+              <p style={{ fontWeight: 'bold' }}>@{req.username}</p>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>waiting for response...</p>
+            </div>
+          </div>
+        ))}
+
+        {/* Empty state — only show if no friends and no pending requests of any kind */}
+        {friendsList.length === 0 && pendingRequests.length === 0 && outgoingRequests.length === 0 && (
           <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
-            <p style={{ fontSize: '0.875rem' }}>No friends connected.</p>
+            <p style={{ fontSize: '0.875rem' }}>No friends connected yet. Add someone above!</p>
           </div>
         )}
 

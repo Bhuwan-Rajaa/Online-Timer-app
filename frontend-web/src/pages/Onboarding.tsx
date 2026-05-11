@@ -10,28 +10,37 @@ export const Onboarding = () => {
   const { user, setProfile } = useStore();
   const navigate = useNavigate();
 
+  const isValidUsername = (name: string) => /^[a-zA-Z0-9_]{3,15}$/.test(name);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
     
+    const trimmed = username.trim();
+    if (!isValidUsername(trimmed)) {
+      setError('Username must be 3-15 characters, alphanumeric and underscores only.');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
     try {
-      // Create profile in Supabase
-      const { data, error } = await supabase
+      // Use upsert to handle retries gracefully (e.g., if profile row exists from a failed attempt)
+      const { data, error: upsertError } = await supabase
         .from('Profiles')
-        .insert([
-          { id: user.id, username, has_onboarded: true }
-        ])
-        .select()
+        .upsert(
+          { id: user.id, username: trimmed, has_onboarded: true },
+          { onConflict: 'id' }
+        )
+        .select('id, username, has_onboarded, weekly_goal_minutes')
         .single();
 
-      if (error) {
-        if (error.code === '23505') { // unique violation
-          throw new Error('Username is already taken');
+      if (upsertError) {
+        if (upsertError.code === '23505') {
+          throw new Error('Username is already taken. Try a different one.');
         }
-        throw error;
+        throw upsertError;
       }
 
       setProfile(data);
@@ -66,14 +75,15 @@ export const Onboarding = () => {
               required
               style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'white', outline: 'none', textAlign: 'center', fontSize: '1.125rem' }}
               placeholder="@alias"
-              pattern="^[a-zA-Z0-9_]{3,15}$"
-              title="3-15 characters, alphanumeric and underscores only."
             />
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+              3-15 characters, letters, numbers, and underscores only.
+            </p>
           </div>
           
           <button 
             type="submit" 
-            disabled={loading || username.length < 3}
+            disabled={loading || username.trim().length < 3}
             className="glass-button"
             style={{ width: '100%' }}
           >

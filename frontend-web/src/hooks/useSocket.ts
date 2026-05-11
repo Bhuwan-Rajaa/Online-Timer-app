@@ -18,17 +18,36 @@ export const useSocket = () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      socket.auth = { token: session.access_token };
       socket.connect();
 
       socket.on('connect', () => {
-        console.log('Socket connected');
-        // Fetch friend IDs from supabase and join_network
-        fetchFriendsAndJoin();
+        console.log('Socket connected, authenticating...');
+        
+        // Authenticate via the server's authenticate event
+        socket.emit('authenticate', session.access_token, (response: any) => {
+          if (response?.success) {
+            console.log('Socket authenticated successfully');
+            // Fetch friend IDs from supabase and join_network
+            fetchFriendsAndJoin();
+          } else {
+            console.error('Socket authentication failed:', response?.error);
+          }
+        });
       });
 
-      socket.on('friend_presence_update', (data: { userId: string, activeSession: any }) => {
-        updateFriendPresence(data.userId, true, data.activeSession);
+      socket.on('friend_presence_update', (data: any) => {
+        if (data.stopped) {
+          // Friend stopped their timer — clear their active session
+          updateFriendPresence(data.userId, true, undefined);
+        } else {
+          // Friend started or updated their timer
+          updateFriendPresence(data.userId, true, {
+            topic: data.topic,
+            timer_type: data.timer_type,
+            start_time_iso: data.start_time_iso,
+            duration_target: data.duration_target,
+          });
+        }
       });
 
       socket.on('disconnect', () => {
@@ -98,6 +117,8 @@ export const useSocket = () => {
       socket.off('connect');
       socket.off('friend_presence_update');
       socket.off('disconnect');
+      socket.off('receive_ephemeral_message');
+      socket.off('nudge_received');
     };
   }, [user]);
 };

@@ -62,7 +62,7 @@ function App() {
     try {
       const { data, error } = await supabase
         .from('Profiles')
-        .select('username, has_onboarded')
+        .select('id, username, has_onboarded, weekly_goal_minutes')
         .eq('id', userId)
         .single();
       

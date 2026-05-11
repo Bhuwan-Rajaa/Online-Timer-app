@@ -11,14 +11,21 @@ export interface LocalSession {
   isActive: boolean;
 }
 
+export interface UserProfile {
+  id: string;
+  username: string;
+  has_onboarded: boolean;
+  weekly_goal_minutes?: number;
+}
+
 interface AuthState {
   user: User | null;
-  profile: { username: string; has_onboarded: boolean } | null;
+  profile: UserProfile | null;
   isLoading: boolean;
   localSession: LocalSession | null;
   
   setUser: (user: User | null) => void;
-  setProfile: (profile: { username: string; has_onboarded: boolean } | null) => void;
+  setProfile: (profile: UserProfile | null) => void;
   setIsLoading: (isLoading: boolean) => void;
   setLocalSession: (session: LocalSession | null) => void;
 }

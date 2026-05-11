@@ -14,6 +14,7 @@ CREATE TABLE public."Friendships" (
     user_id_1 uuid NOT NULL REFERENCES public."Profiles"(id) ON DELETE CASCADE,
     user_id_2 uuid NOT NULL REFERENCES public."Profiles"(id) ON DELETE CASCADE,
     status friendship_status DEFAULT 'PENDING',
+    requested_by uuid NOT NULL REFERENCES public."Profiles"(id) ON DELETE CASCADE, -- Who initiated the request
     created_at timestamp with time zone DEFAULT now(),
     PRIMARY KEY (user_id_1, user_id_2),
     CHECK (user_id_1 < user_id_2) -- Ensure unique pairs regardless of order
