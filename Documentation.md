@@ -156,7 +156,8 @@ This server strictly handles live presence and ephemeral messaging. It operates 
 #### 3.2.1. Server Setup & Resilience
 * **Framework:** Express.js + Socket.io.
 * **Network Resilience:** Configure Socket.io with strict heartbeats (`pingInterval: 10000`, `pingTimeout: 5000`).
-* **Graceful Cleanup:** Implement a `disconnect` listener. If a socket drops while a user's timer state is active, the server immediately broadcasts a `stop_timer` event to their friend room to prevent ghosting on the UI.
+* **Fast Authentication:** Uses `jsonwebtoken` to locally verify the Supabase JWT using `SUPABASE_JWT_SECRET`. This provides zero-latency authentication and prevents Supabase rate-limiting when many users connect simultaneously.
+* **Graceful Cleanup:** Implement a `disconnect` listener. If a socket drops while a user's timer state is active, the server automatically saves the session to Supabase and immediately broadcasts a `stop_timer` event to their friend room to prevent ghosting on the UI.
 
 #### 3.2.2. WebSocket Event Dictionary
 
@@ -164,13 +165,15 @@ This server strictly handles live presence and ephemeral messaging. It operates 
 * `authenticate`: Client sends Supabase JWT for verification.
 * `join_network`: Client passes an array of accepted friend IDs to join specific broadcast rooms.
 * `start_timer`: Payload: `{ topic, timer_type, start_time_iso, duration_target }`. Broadcast to friend rooms.
-* `stop_timer`: Emits a signal that the user has stopped studying.
+* `stop_timer`: Emits a signal that the user has stopped studying. Server handles duration calculation and Supabase insert.
 * `send_ephemeral_message`: Payload: `{ target_user_id, message }`. Passed straight through RAM, zero persistence.
+* `notify_friend_request`: Payload `{ target_user_id }`. Signals the backend to notify the target user of a new friend request.
 
 **Server-to-Client Events:**
 * `friend_presence_update`: Receives the timer payload from a friend.
 * `receive_ephemeral_message`: Receives a text payload.
 * `nudge_received`: Receives a "boost" notification.
+* `friend_request_received`: Notifies the client to refresh their pending requests list.
 
 ---
 
@@ -433,6 +436,8 @@ frontend-web/
 │   ├── lib/
 │   │   ├── supabase.ts          # Supabase client
 │   │   └── socket.ts            # Socket.IO client instance
+│   ├── types/
+│   │   └── index.ts             # Centralized shared types (e.g., TimerType, ActiveSession)
 │   ├── store/
 │   │   ├── useStore.ts          # Auth + local state (Zustand)
 │   │   └── useNetworkStore.ts   # Friend presence + messages (Zustand)
@@ -641,9 +646,10 @@ WHERE (user_id_1 = $1 OR user_id_2 = $1) AND status = 'ACCEPTED';
 | `authenticate` | `jwt: string` | Verify JWT, authenticate socket |
 | `join_network` | `friendIds: string[]` | Subscribe to friends' presence rooms |
 | `start_timer` | `{ topic, timer_type, start_time_iso, duration_target }` | Broadcast timer start |
-| `stop_timer` | `{}` | Stop timer, save session to Supabase |
+| `stop_timer` | `{}` | Stop timer, server saves session to Supabase |
 | `send_ephemeral_message` | `{ target_user_id, message }` | Send temporary message |
 | `send_nudge` | `{ target_user_id }` | Send nudge (haptic feedback) |
+| `notify_friend_request` | `{ target_user_id }` | Notify a user of a new friend request |
 
 ### 6.2 Server-to-Client Events
 
@@ -652,6 +658,7 @@ WHERE (user_id_1 = $1 OR user_id_2 = $1) AND status = 'ACCEPTED';
 | `friend_presence_update` | `{ userId, topic, timer_type, start_time_iso, duration_target }` \| `{ userId, stopped: true }` | Friend started/stopped timer |
 | `receive_ephemeral_message` | `{ sender_id, message }` | Received temporary message |
 | `nudge_received` | `{ sender_id }` | Received nudge |
+| `friend_request_received` | `{}` | Tells the client to re-fetch pending requests |
 
 ---
 
@@ -686,7 +693,7 @@ npm run dev  # Starts on port 5173
 
 **Backend**: Render or Railway Free Tier
 - Auto-deploy from GitHub main branch
-- Environment: SUPABASE_URL, SUPABASE_ANON_KEY, PORT
+- Environment: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_JWT_SECRET, PORT
 - Cold starts: 5-10s (acceptable for presence server)
 
 **Mobile APK**: EAS Build
