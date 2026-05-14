@@ -7,12 +7,13 @@ import { supabase } from '../lib/supabase';
 
 export const Hub = () => {
   const { profile, user } = useStore();
-  const { friends, messages, removeMessage } = useNetworkStore();
+  const { friends, messages, removeMessage, friendRequestRefresh } = useNetworkStore();
   const friendsList = Object.values(friends);
   const navigate = useNavigate();
 
   const [messageInput, setMessageInput] = useState<Record<string, string>>({});
   const [friendUsername, setFriendUsername] = useState('');
+  const [searchResults, setSearchResults] = useState<{id: string, username: string}[]>([]);
   const [addFriendMessage, setAddFriendMessage] = useState('');
   const [pendingRequests, setPendingRequests] = useState<any[]>([]); // incoming
   const [outgoingRequests, setOutgoingRequests] = useState<any[]>([]); // sent by me
@@ -83,7 +84,25 @@ export const Hub = () => {
 
   useEffect(() => {
     fetchPendingRequests();
-  }, [userId]);
+  }, [userId, friendRequestRefresh]);
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (friendUsername.trim().length > 1) {
+        const { data } = await supabase
+          .from('Profiles')
+          .select('id, username')
+          .ilike('username', `%${friendUsername.trim()}%`)
+          .neq('id', userId)
+          .limit(5);
+        setSearchResults(data || []);
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [friendUsername, userId]);
 
   const handleAddFriend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,6 +145,7 @@ export const Hub = () => {
         setAddFriendMessage('Request sent!');
         setFriendUsername('');
         fetchPendingRequests();
+        socket.emit('notify_friend_request', { target_user_id: friendId });
       }
     } catch (e) {
       console.error('Add friend error:', e);
@@ -198,135 +218,163 @@ export const Hub = () => {
         <p style={{ color: 'var(--text-secondary)' }}>Welcome back, <span className="text-gradient">@{profile?.username}</span></p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
-        {/* Quick Start Timer Card */}
-        <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px dashed rgba(255,255,255,0.2)' }}>
-          <div>
-            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>New Session</h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Start a deep work block.</p>
-          </div>
-          <button 
-            onClick={() => navigate('/timer')}
-            className="glass-button" 
-            style={{ marginTop: '1.5rem', width: '100%' }}
-          >
-            Initialize Timer
-          </button>
-        </div>
-
-        {/* Add Friend Card */}
-        <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div>
-            <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>Add Friend</h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Connect with a study partner.</p>
-          </div>
-          <form onSubmit={handleAddFriend} style={{ marginTop: '1rem' }}>
-            <input
-              type="text"
-              placeholder="Username"
-              value={friendUsername}
-              onChange={(e) => setFriendUsername(e.target.value)}
-              style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'white', outline: 'none', marginBottom: '0.5rem' }}
-            />
-            <button type="submit" className="glass-button" style={{ width: '100%', padding: '0.5rem' }} disabled={!friendUsername.trim()}>
-              Send Request
-            </button>
-            {addFriendMessage && <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--accent-primary)', textAlign: 'center' }}>{addFriendMessage}</div>}
-          </form>
-        </div>
-
-        {/* Incoming Pending Requests (others sent to me) */}
-        {pendingRequests.map(req => (
-          <div key={req.id} className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid var(--accent-primary)' }}>
+      <div style={{ marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: 'var(--text-secondary)' }}>Study Session</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
+          {/* Quick Start Timer Card */}
+          <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px dashed rgba(255,255,255,0.2)' }}>
             <div>
-              <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: 'var(--accent-light)' }}>⬇ Incoming Request</h3>
-              <p style={{ fontWeight: 'bold' }}>@{req.username}</p>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>wants to connect</p>
+              <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>New Session</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Start a deep work block.</p>
             </div>
             <button 
-              onClick={() => handleAcceptRequest(req.id)}
+              onClick={() => navigate('/timer')}
               className="glass-button" 
-              style={{ marginTop: '1rem', width: '100%', background: 'var(--accent-primary)' }}
+              style={{ marginTop: '1.5rem', width: '100%' }}
             >
-              Accept
+              Initialize Timer
             </button>
           </div>
-        ))}
+        </div>
+      </div>
 
-        {/* Outgoing Pending Requests (I sent these) */}
-        {outgoingRequests.map(req => (
-          <div key={req.id} className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid rgba(255,255,255,0.1)', opacity: 0.7 }}>
+      <div style={{ marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: 'var(--text-secondary)' }}>Manage Network</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
+          {/* Add Friend Card */}
+          <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
             <div>
-              <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>⬆ Pending Sent</h3>
-              <p style={{ fontWeight: 'bold' }}>@{req.username}</p>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>waiting for response...</p>
+              <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>Add Friend</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Connect with a study partner.</p>
             </div>
-          </div>
-        ))}
-
-        {/* Empty state — only show if no friends and no pending requests of any kind */}
-        {friendsList.length === 0 && pendingRequests.length === 0 && outgoingRequests.length === 0 && (
-          <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
-            <p style={{ fontSize: '0.875rem' }}>No friends connected yet. Add someone above!</p>
-          </div>
-        )}
-
-        {friendsList.map(friend => (
-          <div key={friend.id} className="glass-panel" style={{ padding: '1.5rem', position: 'relative', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <div style={{ 
-                  width: '12px', 
-                  height: '12px', 
-                  borderRadius: '50%', 
-                  background: friend.isOnline ? (friend.activeSession ? 'var(--accent-primary)' : 'var(--success)') : 'rgba(255,255,255,0.2)',
-                  boxShadow: friend.isOnline ? `0 0 10px ${friend.activeSession ? 'var(--accent-primary)' : 'var(--success)'}` : 'none'
-                }} className={friend.activeSession ? 'animate-pulse-glow' : ''} />
-                <span style={{ fontWeight: '500' }}>@{friend.username}</span>
-              </div>
-              <button 
-                onClick={() => handleNudge(friend.id)}
-                className="glass-button"
-                style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem' }}
-              >
-                Nudge
-              </button>
-            </div>
-            
-            {friend.activeSession ? (
-              <div style={{ background: 'rgba(0,0,0,0.3)', padding: '0.75rem', borderRadius: '8px' }}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.25rem' }}>
-                  {friend.activeSession.timer_type}
-                </div>
-                <div style={{ fontWeight: 'bold' }}>{friend.activeSession.topic}</div>
-              </div>
-            ) : (
-              <div style={{ padding: '0.75rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                {friend.isOnline ? 'Idle' : 'Offline'}
-              </div>
-            )}
-            
-            {/* Quick Message Input for this friend */}
-            <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(friend.id); }} style={{ marginTop: '1rem' }}>
+            <form onSubmit={handleAddFriend} style={{ marginTop: '1rem', position: 'relative' }}>
               <input
                 type="text"
-                placeholder={`> msg @${friend.username}`}
-                value={messageInput[friend.id] || ''}
-                onChange={(e) => setMessageInput(prev => ({ ...prev, [friend.id]: e.target.value }))}
-                style={{
-                  width: '100%',
-                  background: 'rgba(0,0,0,0.2)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: '4px',
-                  padding: '0.5rem',
-                  color: 'var(--text-primary)',
-                  fontSize: '0.875rem',
-                  fontFamily: 'var(--font-mono)'
-                }}
+                placeholder="Search username..."
+                value={friendUsername}
+                onChange={(e) => setFriendUsername(e.target.value)}
+                style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'white', outline: 'none', marginBottom: '0.5rem' }}
               />
+              {searchResults.length > 0 && (
+                <div style={{ position: 'absolute', top: '3rem', left: 0, right: 0, background: 'var(--bg-color)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '8px', marginTop: '0.25rem', zIndex: 10, overflow: 'hidden' }}>
+                  {searchResults.map(result => (
+                    <div 
+                      key={result.id} 
+                      onClick={() => { setFriendUsername(result.username); setSearchResults([]); }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                      style={{ padding: '0.75rem', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.05)', transition: 'background 0.2s' }}
+                    >
+                      @{result.username}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button type="submit" className="glass-button" style={{ width: '100%', padding: '0.5rem' }} disabled={!friendUsername.trim()}>
+                Send Request
+              </button>
+              {addFriendMessage && <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--accent-light)', textAlign: 'center' }}>{addFriendMessage}</div>}
             </form>
           </div>
-        ))}
+
+          {/* Incoming Pending Requests (others sent to me) */}
+          {pendingRequests.map(req => (
+            <div key={req.id} className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid var(--accent-primary)' }}>
+              <div>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: 'var(--accent-light)' }}>⬇ Incoming Request</h3>
+                <p style={{ fontWeight: 'bold' }}>@{req.username}</p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>wants to connect</p>
+              </div>
+              <button 
+                onClick={() => handleAcceptRequest(req.id)}
+                className="glass-button" 
+                style={{ marginTop: '1rem', width: '100%', background: 'var(--accent-primary)' }}
+              >
+                Accept
+              </button>
+            </div>
+          ))}
+
+          {/* Outgoing Pending Requests (I sent these) */}
+          {outgoingRequests.map(req => (
+            <div key={req.id} className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid rgba(255,255,255,0.1)', opacity: 0.7 }}>
+              <div>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>⬆ Pending Sent</h3>
+                <p style={{ fontWeight: 'bold' }}>@{req.username}</p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>waiting for response...</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: 'var(--text-secondary)' }}>Friends</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
+          {/* Empty state — only show if no friends */}
+          {friendsList.length === 0 && (
+            <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5, gridColumn: '1 / -1' }}>
+              <p style={{ fontSize: '0.875rem' }}>No friends connected yet. Add someone above!</p>
+            </div>
+          )}
+
+          {friendsList.map(friend => (
+            <div key={friend.id} className="glass-panel" style={{ padding: '1.5rem', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ 
+                    width: '12px', 
+                    height: '12px', 
+                    borderRadius: '50%', 
+                    background: friend.isOnline ? (friend.activeSession ? 'var(--accent-primary)' : 'var(--success)') : 'rgba(255,255,255,0.2)',
+                    boxShadow: friend.isOnline ? `0 0 10px ${friend.activeSession ? 'var(--accent-primary)' : 'var(--success)'}` : 'none'
+                  }} className={friend.activeSession ? 'animate-pulse-glow' : ''} />
+                  <span style={{ fontWeight: '500' }}>@{friend.username}</span>
+                </div>
+                <button 
+                  onClick={() => handleNudge(friend.id)}
+                  className="glass-button"
+                  style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem' }}
+                >
+                  Nudge
+                </button>
+              </div>
+              
+              {friend.activeSession ? (
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '0.75rem', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.25rem' }}>
+                    {friend.activeSession.timer_type}
+                  </div>
+                  <div style={{ fontWeight: 'bold' }}>{friend.activeSession.topic}</div>
+                </div>
+              ) : (
+                <div style={{ padding: '0.75rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                  {friend.isOnline ? 'Idle' : 'Offline'}
+                </div>
+              )}
+              
+              {/* Quick Message Input for this friend */}
+              <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(friend.id); }} style={{ marginTop: '1rem' }}>
+                <input
+                  type="text"
+                  placeholder={`> msg @${friend.username}`}
+                  value={messageInput[friend.id] || ''}
+                  onChange={(e) => setMessageInput(prev => ({ ...prev, [friend.id]: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    background: 'rgba(0,0,0,0.2)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '4px',
+                    padding: '0.5rem',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.875rem',
+                    fontFamily: 'var(--font-mono)'
+                  }}
+                />
+              </form>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

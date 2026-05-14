@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import type { User } from '@supabase/supabase-js';
-
-export type TimerType = 'POMODORO' | 'STOPWATCH';
+import type { TimerType } from '../types';
 
 export interface LocalSession {
   topic: string;

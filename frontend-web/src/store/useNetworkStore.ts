@@ -1,25 +1,11 @@
 import { create } from 'zustand';
-
-export interface ActiveSession {
-  topic: string;
-  timer_type: 'POMODORO' | 'STOPWATCH';
-  start_time_iso: string;
-  duration_target?: number;
-}
+import type { ActiveSession, EphemeralMessage } from '../types';
 
 export interface FriendState {
   id: string;
   username: string;
   isOnline: boolean;
   activeSession?: ActiveSession;
-}
-
-export interface EphemeralMessage {
-  id: string;
-  senderId: string;
-  senderName: string;
-  text: string;
-  timestamp: number;
 }
 
 interface NetworkState {
@@ -29,11 +15,15 @@ interface NetworkState {
   updateFriendPresence: (id: string, isOnline: boolean, activeSession?: ActiveSession) => void;
   addMessage: (msg: EphemeralMessage) => void;
   removeMessage: (id: string) => void;
+  friendRequestRefresh: number;
+  incrementFriendRequestRefresh: () => void;
 }
 
 export const useNetworkStore = create<NetworkState>((set) => ({
   friends: {},
   messages: [],
+  friendRequestRefresh: 0,
+  incrementFriendRequestRefresh: () => set((state) => ({ friendRequestRefresh: state.friendRequestRefresh + 1 })),
   setFriends: (friendsList) => 
     set((state) => {
       const newFriends = { ...state.friends };

@@ -29,6 +29,17 @@ export const useSocket = () => {
             console.log('Socket authenticated successfully');
             // Fetch friend IDs from supabase and join_network
             fetchFriendsAndJoin();
+
+            // Recover state if a local timer is active
+            const localSession = useStore.getState().localSession;
+            if (localSession?.isActive) {
+              socket.emit('start_timer', {
+                topic: localSession.topic,
+                timer_type: localSession.type,
+                start_time_iso: new Date(localSession.startTime).toISOString(),
+                duration_target: localSession.targetDuration
+              });
+            }
           } else {
             console.error('Socket authentication failed:', response?.error);
           }
@@ -73,6 +84,20 @@ export const useSocket = () => {
         setTimeout(() => {
           document.body.classList.remove('animate-shake');
         }, 500);
+      });
+
+      socket.on('friend_request_received', () => {
+        useNetworkStore.getState().addMessage({
+          id: Date.now().toString(),
+          senderId: 'system',
+          senderName: 'System',
+          text: 'You received a new friend request!',
+          timestamp: Date.now()
+        });
+        // We trigger the refresh counter in the store
+        if (useNetworkStore.getState().incrementFriendRequestRefresh) {
+          useNetworkStore.getState().incrementFriendRequestRefresh();
+        }
       });
     };
 
@@ -119,6 +144,7 @@ export const useSocket = () => {
       socket.off('disconnect');
       socket.off('receive_ephemeral_message');
       socket.off('nudge_received');
+      socket.off('friend_request_received');
     };
   }, [user]);
 };

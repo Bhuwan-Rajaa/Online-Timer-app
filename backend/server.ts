@@ -4,6 +4,7 @@ import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -37,13 +38,21 @@ const activeTimers = new Map<string, any>(); // userId -> timerPayload
 io.on('connection', (socket: AuthenticatedSocket) => {
   console.log('New connection:', socket.id);
 
-  socket.on('authenticate', async (jwt: string, callback) => {
+  socket.on('authenticate', async (token: string, callback) => {
     try {
-      const { data: { user }, error } = await supabase.auth.getUser(jwt);
-      if (error || !user) {
-        console.error('Auth error:', error?.message);
-        if(callback) callback({ success: false, error: 'Authentication failed' });
-        return;
+      let user: any = null;
+      
+      if (process.env.SUPABASE_JWT_SECRET) {
+        // Fast, local verification
+        const decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET) as any;
+        // JWT from Supabase contains sub as user_id
+        user = { id: decoded.sub };
+      } else {
+        // Fallback to network request if secret isn't provided
+        console.warn('SUPABASE_JWT_SECRET not provided, falling back to network auth verification.');
+        const { data, error } = await supabase.auth.getUser(token);
+        if (error || !data.user) throw new Error(error?.message || 'Invalid user');
+        user = data.user;
       }
       
       socket.user = user;
@@ -52,7 +61,7 @@ io.on('connection', (socket: AuthenticatedSocket) => {
       if(callback) callback({ success: true, userId: user.id });
     } catch (err) {
       console.error('Auth server error:', err);
-      if(callback) callback({ success: false, error: 'Server error' });
+      if(callback) callback({ success: false, error: 'Authentication failed' });
     }
   });
 
@@ -143,6 +152,11 @@ io.on('connection', (socket: AuthenticatedSocket) => {
     io.to(`user_${target_user_id}`).emit('nudge_received', {
       sender_id: socket.user.id
     });
+  });
+
+  socket.on('notify_friend_request', ({ target_user_id }) => {
+    if (!socket.user) return;
+    io.to(`user_${target_user_id}`).emit('friend_request_received');
   });
 
   socket.on('disconnect', async () => {

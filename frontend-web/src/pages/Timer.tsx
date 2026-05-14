@@ -40,6 +40,11 @@ export const Timer = () => {
   const handleStart = () => {
     if (!topic) return;
 
+    // Gracefully ask for notification permission when user explicitly starts a timer
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
     const session = {
       topic,
       type,
@@ -63,26 +68,7 @@ export const Timer = () => {
   const handleStop = async () => {
     if (!localSession) return;
     
-    // Save to Supabase
-    if (useStore.getState().user) {
-      const { user } = useStore.getState();
-      const durationSeconds = Math.floor((Date.now() - localSession.startTime) / 1000);
-      
-      if (durationSeconds > 10) {
-        try {
-          await supabase.from('Sessions').insert([{
-            user_id: user?.id,
-            topic: localSession.topic,
-            timer_type: localSession.type,
-            duration_seconds: durationSeconds
-          }]);
-        } catch (e) {
-          console.error('Error saving session:', e);
-        }
-      }
-    }
-
-    // Broadcast stop
+    // The backend's stop_timer event handler calculates the duration and saves it to Supabase securely.
     socket.emit('stop_timer');
     setLocalSession(null);
     setElapsed(0);
@@ -121,12 +107,6 @@ export const Timer = () => {
     return `${m}:${s}`;
   };
 
-  // Ask for notification permission on mount
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
 
   return (
     <div className="flex-center" style={{ height: '100%', flexDirection: 'column' }}>
