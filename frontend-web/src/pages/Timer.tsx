@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
-import type { TimerType } from '../store/useStore';
+import type { TimerType } from '../types';
 import { socket } from '../lib/socket';
-import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 
 
