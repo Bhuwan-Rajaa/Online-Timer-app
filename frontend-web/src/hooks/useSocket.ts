@@ -7,9 +7,13 @@ import { supabase } from '../lib/supabase';
 export const useSocket = () => {
   const { user } = useStore();
   const { updateFriendPresence } = useNetworkStore();
-  const isInitialized = useRef(false);
+  // Keep a ref to the latest friend IDs so the socket connect handler can use them
+  const friendIdsRef = useRef<string[]>([]);
 
-  const fetchFriendsAndJoin = async (userId: string) => {
+  // ─── Step 1: Load friends from Supabase immediately (no socket needed) ───────
+  // This runs as soon as the user is known, independently of socket status.
+  // This is why friends show on mobile even when the Render backend is cold.
+  const loadFriendsFromDB = async (userId: string) => {
     try {
       const { data: friendships } = await supabase
         .from('Friendships')
@@ -19,66 +23,83 @@ export const useSocket = () => {
 
       if (!friendships || friendships.length === 0) {
         useNetworkStore.getState().setFriends([]);
-        socket.emit('join_network', []);
-        return;
+        friendIdsRef.current = [];
+        return [];
       }
 
       const friendIds = friendships.map(f =>
         f.user_id_1 === userId ? f.user_id_2 : f.user_id_1
       );
+      friendIdsRef.current = friendIds;
 
       const { data: profiles } = await supabase
         .from('Profiles')
         .select('id, username')
         .in('id', friendIds);
 
-      if (profiles) {
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
+      if (!profiles) return friendIds;
 
-        const { data: sessions } = await supabase
-          .from('Sessions')
-          .select('user_id, duration_seconds')
-          .in('user_id', friendIds)
-          .gte('timestamp', startOfDay.toISOString());
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
 
-        const dailyTimes: Record<string, number> = {};
-        if (sessions) {
-          sessions.forEach(s => {
-            dailyTimes[s.user_id] = (dailyTimes[s.user_id] || 0) + s.duration_seconds;
-          });
-        }
+      const { data: sessions } = await supabase
+        .from('Sessions')
+        .select('user_id, duration_seconds')
+        .in('user_id', friendIds)
+        .gte('timestamp', startOfDay.toISOString());
 
-        const friendsList = profiles.map(p => ({
-          id: p.id,
-          username: p.username,
-          isOnline: false,
-          todaySeconds: dailyTimes[p.id] || 0
-        }));
-        useNetworkStore.getState().setFriends(friendsList);
-        socket.emit('join_network', profiles.map(p => p.id));
+      const dailyTimes: Record<string, number> = {};
+      if (sessions) {
+        sessions.forEach(s => {
+          dailyTimes[s.user_id] = (dailyTimes[s.user_id] || 0) + s.duration_seconds;
+        });
       }
+
+      const friendsList = profiles.map(p => ({
+        id: p.id,
+        username: p.username,
+        isOnline: false,
+        todaySeconds: dailyTimes[p.id] || 0
+      }));
+      useNetworkStore.getState().setFriends(friendsList);
+      return friendIds;
     } catch (e) {
-      console.error('Failed to fetch friends:', e);
+      console.error('Failed to load friends from DB:', e);
+      return [];
     }
   };
 
+  // ─── Step 2: Tell the socket server which friend rooms to join ───────────────
+  const joinSocketNetwork = (friendIds: string[]) => {
+    if (socket.connected) {
+      socket.emit('join_network', friendIds);
+    }
+  };
+
+  // Expose a combined refetch for Hub.tsx to call after accepting a friend request
   useEffect(() => {
-    // Expose fetchFriendsAndJoin globally so Hub.tsx can call it after accepting a friend request
-    (window as any).__refetchFriends = () => {
-      if (user) fetchFriendsAndJoin(user.id);
+    (window as any).__refetchFriends = async () => {
+      if (user) {
+        const ids = await loadFriendsFromDB(user.id);
+        joinSocketNetwork(ids);
+      }
     };
   }, [user]);
 
+  // ─── Load friends immediately when user is known ─────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    loadFriendsFromDB(user.id);
+  }, [user]);
+
+  // ─── Socket setup ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) {
       socket.disconnect();
-      isInitialized.current = false;
       return;
     }
 
-    // --- Register all persistent event listeners ONCE ---
-    // These must be outside 'connect' so they survive reconnects without stacking.
+    // Register all persistent event listeners ONCE (outside connect)
     socket.off('friend_presence_update');
     socket.off('receive_ephemeral_message');
     socket.off('nudge_received');
@@ -131,19 +152,24 @@ export const useSocket = () => {
       useNetworkStore.getState().incrementFriendRequestRefresh();
     });
 
-    // --- Auth + join on every (re)connect ---
+    // Auth + join on every (re)connect — gets fresh token each time
     const handleConnect = async () => {
       console.log('Socket connected, authenticating...');
-      // Always get a fresh session token on (re)connect
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
       socket.emit('authenticate', session.access_token, async (response: any) => {
         if (response?.success) {
           console.log('Socket authenticated successfully');
-          await fetchFriendsAndJoin(user.id);
+          // Use already-loaded friend IDs from the ref (avoids re-querying DB)
+          // But if ref is empty, load again (e.g. cold reconnect)
+          let ids = friendIdsRef.current;
+          if (ids.length === 0) {
+            ids = await loadFriendsFromDB(user.id);
+          }
+          joinSocketNetwork(ids);
 
-          // Recover state if a local timer was active before reconnect
+          // Recover active timer state after reconnect
           const localSession = useStore.getState().localSession;
           if (localSession?.isActive) {
             socket.emit('start_timer', {
@@ -167,11 +193,9 @@ export const useSocket = () => {
       console.log('Socket disconnected:', reason);
     });
 
-    // Trigger initial connection
     if (!socket.connected) {
       socket.connect();
     } else {
-      // Already connected (e.g., user object changed), re-auth immediately
       handleConnect();
     }
 
