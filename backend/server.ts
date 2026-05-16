@@ -145,7 +145,8 @@ io.on('connection', (socket: AuthenticatedSocket) => {
 
       socket.to(`friend_network_${socket.user.id}`).emit('friend_presence_update', {
         userId: socket.user.id,
-        stopped: true
+        stopped: true,
+        duration_seconds: durationSeconds
       });
     }
     if (callback) callback();
@@ -205,7 +206,8 @@ io.on('connection', (socket: AuthenticatedSocket) => {
 
         socket.to(`friend_network_${socket.user.id}`).emit('friend_presence_update', {
           userId: socket.user.id,
-          stopped: true
+          stopped: true,
+          duration_seconds: durationSeconds
         });
       }
     }

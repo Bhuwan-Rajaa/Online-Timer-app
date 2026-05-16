@@ -51,6 +51,9 @@ export const useSocket = () => {
           // Friend stopped their timer — clear their active session
           const isOnline = useNetworkStore.getState().friends[data.userId]?.isOnline ?? true;
           updateFriendPresence(data.userId, isOnline, undefined);
+          if (data.duration_seconds) {
+            useNetworkStore.getState().incrementFriendDailyTime(data.userId, data.duration_seconds);
+          }
         } else if (data.statusOnly) {
           // General online/offline status update
           const currentSession = useNetworkStore.getState().friends[data.userId]?.activeSession;
@@ -128,10 +131,27 @@ export const useSocket = () => {
           .in('id', friendIds);
 
         if (profiles) {
+          const startOfDay = new Date();
+          startOfDay.setHours(0, 0, 0, 0);
+          
+          const { data: sessions } = await supabase
+            .from('Sessions')
+            .select('user_id, duration_seconds')
+            .in('user_id', friendIds)
+            .gte('timestamp', startOfDay.toISOString());
+            
+          const dailyTimes: Record<string, number> = {};
+          if (sessions) {
+            sessions.forEach(s => {
+              dailyTimes[s.user_id] = (dailyTimes[s.user_id] || 0) + s.duration_seconds;
+            });
+          }
+
           const friendsList = profiles.map(p => ({
             id: p.id,
             username: p.username,
-            isOnline: false
+            isOnline: false,
+            todaySeconds: dailyTimes[p.id] || 0
           }));
           useNetworkStore.getState().setFriends(friendsList);
           socket.emit('join_network', profiles.map(p => p.id));

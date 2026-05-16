@@ -5,6 +5,15 @@ import { useNavigate } from 'react-router-dom';
 import { socket } from '../lib/socket';
 import { supabase } from '../lib/supabase';
 
+const formatDailyTime = (seconds?: number) => {
+  if (!seconds) return '0m';
+  if (seconds < 60) return '< 1m';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+};
+
 export const Hub = () => {
   const { profile, user } = useStore();
   const { friends, messages, removeMessage, friendRequestRefresh } = useNetworkStore();
@@ -329,7 +338,12 @@ export const Hub = () => {
                     background: friend.isOnline ? (friend.activeSession ? 'var(--accent-primary)' : 'var(--success)') : 'rgba(255,255,255,0.2)',
                     boxShadow: friend.isOnline ? `0 0 10px ${friend.activeSession ? 'var(--accent-primary)' : 'var(--success)'}` : 'none'
                   }} className={friend.activeSession ? 'animate-pulse-glow' : ''} />
-                  <span style={{ fontWeight: '500' }}>@{friend.username}</span>
+                  <div>
+                    <span style={{ fontWeight: '500', display: 'block' }}>@{friend.username}</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      Today: <span style={{ color: 'var(--accent-light)' }}>{formatDailyTime(friend.todaySeconds)}</span>
+                    </span>
+                  </div>
                 </div>
                 <button 
                   onClick={() => handleNudge(friend.id)}
@@ -341,15 +355,15 @@ export const Hub = () => {
               </div>
               
               {friend.activeSession ? (
-                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '0.75rem', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '0.25rem' }}>
-                    {friend.activeSession.timer_type}
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--accent-primary)' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--accent-primary)', fontWeight: 'bold', letterSpacing: '1px', marginBottom: '0.25rem' }}>
+                    STUDYING ({friend.activeSession.timer_type})
                   </div>
                   <div style={{ fontWeight: 'bold' }}>{friend.activeSession.topic}</div>
                 </div>
               ) : (
-                <div style={{ padding: '0.75rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                  {friend.isOnline ? 'Idle' : 'Offline'}
+                <div style={{ padding: '0.75rem', fontSize: '0.875rem', color: 'var(--text-secondary)', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+                  {friend.isOnline ? '🟢 Online (Idle)' : '⚪ Offline'}
                 </div>
               )}
               

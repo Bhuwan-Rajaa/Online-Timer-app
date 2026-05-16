@@ -6,6 +6,7 @@ export interface FriendState {
   username: string;
   isOnline: boolean;
   activeSession?: ActiveSession;
+  todaySeconds?: number;
 }
 
 interface NetworkState {
@@ -17,6 +18,7 @@ interface NetworkState {
   removeMessage: (id: string) => void;
   friendRequestRefresh: number;
   incrementFriendRequestRefresh: () => void;
+  incrementFriendDailyTime: (id: string, seconds: number) => void;
 }
 
 export const useNetworkStore = create<NetworkState>((set) => ({
@@ -49,4 +51,15 @@ export const useNetworkStore = create<NetworkState>((set) => ({
     }),
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
   removeMessage: (id) => set((state) => ({ messages: state.messages.filter(m => m.id !== id) })),
+  incrementFriendDailyTime: (id, seconds) =>
+    set((state) => {
+      const friend = state.friends[id];
+      if (!friend) return state;
+      return {
+        friends: {
+          ...state.friends,
+          [id]: { ...friend, todaySeconds: (friend.todaySeconds || 0) + seconds }
+        }
+      };
+    }),
 }));
