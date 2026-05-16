@@ -1,14 +1,18 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 
 export const Onboarding = () => {
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const { user, setProfile } = useStore();
+  const { user, profile, setProfile } = useStore();
   const navigate = useNavigate();
+
+  if (profile?.has_onboarded) {
+    return <Navigate to="/" replace />;
+  }
 
   const isValidUsername = (name: string) => /^[a-zA-Z0-9_]{3,15}$/.test(name);
 
