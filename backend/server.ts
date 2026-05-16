@@ -34,6 +34,7 @@ interface AuthenticatedSocket extends Socket {
 
 // In-memory mapping to store active timers.
 const activeTimers = new Map<string, any>(); // userId -> timerPayload
+const onlineUsers = new Map<string, number>(); // userId -> connection count
 
 io.on('connection', (socket: AuthenticatedSocket) => {
   console.log('New connection:', socket.id);
@@ -57,6 +58,13 @@ io.on('connection', (socket: AuthenticatedSocket) => {
       
       socket.user = user;
       socket.join(`user_${user.id}`); // private room for direct messages/nudges
+      
+      const currentCount = onlineUsers.get(user.id) || 0;
+      onlineUsers.set(user.id, currentCount + 1);
+      if (currentCount === 0) {
+        socket.to(`friend_network_${user.id}`).emit('friend_presence_update', { userId: user.id, isOnline: true, statusOnly: true });
+      }
+
       console.log(`User ${user.id} authenticated on socket ${socket.id}`);
       if(callback) callback({ success: true, userId: user.id });
     } catch (err) {
@@ -73,8 +81,12 @@ io.on('connection', (socket: AuthenticatedSocket) => {
       socket.join(`friend_network_${id}`); 
       // Sync their current active timer immediately
       const activeTimer = activeTimers.get(id);
+      const isOnline = onlineUsers.has(id);
+      
       if (activeTimer) {
         socket.emit('friend_presence_update', activeTimer);
+      } else if (isOnline) {
+        socket.emit('friend_presence_update', { userId: id, isOnline: true, statusOnly: true });
       }
     });
   });
@@ -161,6 +173,18 @@ io.on('connection', (socket: AuthenticatedSocket) => {
 
   socket.on('disconnect', async () => {
     if (socket.user) {
+      const currentCount = onlineUsers.get(socket.user.id) || 0;
+      if (currentCount <= 1) {
+        onlineUsers.delete(socket.user.id);
+        socket.to(`friend_network_${socket.user.id}`).emit('friend_presence_update', {
+          userId: socket.user.id,
+          isOnline: false,
+          statusOnly: true
+        });
+      } else {
+        onlineUsers.set(socket.user.id, currentCount - 1);
+      }
+
       const activeTimer = activeTimers.get(socket.user.id);
       if (activeTimer) {
         activeTimers.delete(socket.user.id);

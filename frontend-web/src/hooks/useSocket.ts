@@ -49,7 +49,12 @@ export const useSocket = () => {
       socket.on('friend_presence_update', (data: any) => {
         if (data.stopped) {
           // Friend stopped their timer — clear their active session
-          updateFriendPresence(data.userId, true, undefined);
+          const isOnline = useNetworkStore.getState().friends[data.userId]?.isOnline ?? true;
+          updateFriendPresence(data.userId, isOnline, undefined);
+        } else if (data.statusOnly) {
+          // General online/offline status update
+          const currentSession = useNetworkStore.getState().friends[data.userId]?.activeSession;
+          updateFriendPresence(data.userId, data.isOnline, currentSession);
         } else {
           // Friend started or updated their timer
           updateFriendPresence(data.userId, true, {
