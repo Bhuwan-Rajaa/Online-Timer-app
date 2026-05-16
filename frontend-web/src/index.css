@@ -159,3 +159,34 @@ button {
   transform: none;
   box-shadow: none;
 }
+
+/* ========== Responsive / Mobile ========== */
+@media (max-width: 768px) {
+  .container {
+    padding: 1rem;
+  }
+
+  /* Stack nav on mobile */
+  header {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem !important;
+  }
+
+  nav {
+    gap: 1.25rem !important;
+    flex-wrap: wrap;
+  }
+
+  /* Ensure grids drop to single column */
+  [style*="repeat(auto-fill, minmax(280px"] {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding: 0.75rem;
+  }
+}

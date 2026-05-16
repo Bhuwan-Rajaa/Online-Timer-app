@@ -75,20 +75,30 @@ io.on('connection', (socket: AuthenticatedSocket) => {
 
   socket.on('join_network', (friendIds: string[]) => {
     if (!socket.user) return;
-    
+    const myId = socket.user.id;
+
     // Subscribe to friends' presence updates
     friendIds.forEach(id => {
-      socket.join(`friend_network_${id}`); 
-      // Sync their current active timer immediately
+      socket.join(`friend_network_${id}`);
+      // Immediately push back the friend's current state to this socket
       const activeTimer = activeTimers.get(id);
       const isOnline = onlineUsers.has(id);
-      
+
       if (activeTimer) {
         socket.emit('friend_presence_update', activeTimer);
       } else if (isOnline) {
         socket.emit('friend_presence_update', { userId: id, isOnline: true, statusOnly: true });
       }
     });
+
+    // Also tell each of my friends who are already in my network room that I am online now
+    // This fixes the race where the authenticate broadcast fires into an empty room
+    const myActiveTimer = activeTimers.get(myId);
+    if (myActiveTimer) {
+      socket.to(`friend_network_${myId}`).emit('friend_presence_update', myActiveTimer);
+    } else {
+      socket.to(`friend_network_${myId}`).emit('friend_presence_update', { userId: myId, isOnline: true, statusOnly: true });
+    }
   });
 
   socket.on('request_presence_sync', () => {

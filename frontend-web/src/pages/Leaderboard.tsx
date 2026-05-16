@@ -58,6 +58,16 @@ export const Leaderboard = () => {
     };
 
     fetchLeaderboard();
+
+    // Realtime: re-fetch whenever a session is saved
+    const channel = supabase
+      .channel('leaderboard_sessions')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Sessions' }, () => {
+        fetchLeaderboard();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   const formatTime = (totalSecs: number) => {

@@ -46,6 +46,16 @@ export const Profile = () => {
     };
 
     fetchHistory();
+
+    // Realtime: re-fetch when a new session for this user is inserted
+    const channel = supabase
+      .channel(`vault_sessions_${user.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Sessions', filter: `user_id=eq.${user.id}` }, () => {
+        fetchHistory();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [user]);
 
   const formatTime = (totalSecs: number) => {

@@ -95,6 +95,17 @@ export const Hub = () => {
     fetchPendingRequests();
   }, [userId, friendRequestRefresh]);
 
+  // Supabase realtime: refresh pending requests when Friendships table changes
+  useEffect(() => {
+    if (!userId) return;
+    const channel = supabase
+      .channel(`friendships_${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Friendships', filter: `user_id_1=eq.${userId}` }, fetchPendingRequests)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Friendships', filter: `user_id_2=eq.${userId}` }, fetchPendingRequests)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userId]);
+
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (friendUsername.trim().length > 1) {
@@ -177,15 +188,12 @@ export const Hub = () => {
       console.error('Accept request error:', error);
       return;
     }
-    
-    // Refresh the pending requests and re-fetch friends list
+
+    // Refresh pending requests list immediately
     fetchPendingRequests();
-    // Trigger a reconnect to refresh friend network
-    if (socket.connected) {
-      socket.disconnect();
-      setTimeout(() => socket.connect(), 500);
-    } else {
-      window.location.reload();
+    // Re-fetch the full friends list and re-join the network room
+    if ((window as any).__refetchFriends) {
+      (window as any).__refetchFriends();
     }
   };
 
