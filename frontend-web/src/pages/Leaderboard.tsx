@@ -59,7 +59,11 @@ export const Leaderboard = () => {
 
     fetchLeaderboard();
 
-    // Realtime: re-fetch whenever a session is saved
+    // Re-fetch when user switches back to this tab (works on mobile too)
+    const onVisible = () => { if (document.visibilityState === 'visible') fetchLeaderboard(); };
+    document.addEventListener('visibilitychange', onVisible);
+
+    // Realtime subscription (works if Sessions table has replication enabled in Supabase)
     const channel = supabase
       .channel('leaderboard_sessions')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Sessions' }, () => {
@@ -67,7 +71,10 @@ export const Leaderboard = () => {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const formatTime = (totalSecs: number) => {

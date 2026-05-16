@@ -47,7 +47,11 @@ export const Profile = () => {
 
     fetchHistory();
 
-    // Realtime: re-fetch when a new session for this user is inserted
+    // Re-fetch when user switches back to this tab (works on mobile too)
+    const onVisible = () => { if (document.visibilityState === 'visible') fetchHistory(); };
+    document.addEventListener('visibilitychange', onVisible);
+
+    // Realtime subscription (works if Sessions table has replication enabled in Supabase)
     const channel = supabase
       .channel(`vault_sessions_${user.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Sessions', filter: `user_id=eq.${user.id}` }, () => {
@@ -55,7 +59,10 @@ export const Profile = () => {
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   const formatTime = (totalSecs: number) => {

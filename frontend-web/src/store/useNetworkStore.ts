@@ -31,9 +31,17 @@ export const useNetworkStore = create<NetworkState>((set) => ({
       const newFriends = { ...state.friends };
       friendsList.forEach(f => {
         if (!newFriends[f.id]) {
+          // New friend — add with defaults
           newFriends[f.id] = f;
         } else {
-          newFriends[f.id] = { ...newFriends[f.id], ...f };
+          // Existing friend — update DB fields (username, todaySeconds)
+          // but PRESERVE realtime socket state (isOnline, activeSession)
+          // so a DB refresh never resets what the socket already told us
+          newFriends[f.id] = {
+            ...f,
+            isOnline: newFriends[f.id].isOnline,
+            activeSession: newFriends[f.id].activeSession,
+          };
         }
       });
       return { friends: newFriends };
