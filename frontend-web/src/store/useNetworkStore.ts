@@ -9,9 +9,16 @@ export interface FriendState {
   todaySeconds?: number;
 }
 
+interface PendingPresenceUpdate {
+  id: string;
+  isOnline: boolean;
+  activeSession?: ActiveSession;
+}
+
 interface NetworkState {
   friends: Record<string, FriendState>;
   messages: EphemeralMessage[];
+  pendingPresenceUpdates: PendingPresenceUpdate[];
   setFriends: (friends: FriendState[]) => void;
   updateFriendPresence: (id: string, isOnline: boolean, activeSession?: ActiveSession) => void;
   addMessage: (msg: EphemeralMessage) => void;
@@ -24,6 +31,7 @@ interface NetworkState {
 export const useNetworkStore = create<NetworkState>((set) => ({
   friends: {},
   messages: [],
+  pendingPresenceUpdates: [],
   friendRequestRefresh: 0,
   incrementFriendRequestRefresh: () => set((state) => ({ friendRequestRefresh: state.friendRequestRefresh + 1 })),
   setFriends: (friendsList) => 
@@ -44,12 +52,39 @@ export const useNetworkStore = create<NetworkState>((set) => ({
           };
         }
       });
-      return { friends: newFriends };
+
+      // Replay any pending presence updates that arrived before friends were loaded
+      const remainingPending: PendingPresenceUpdate[] = [];
+      state.pendingPresenceUpdates.forEach(update => {
+        if (newFriends[update.id]) {
+          newFriends[update.id] = {
+            ...newFriends[update.id],
+            isOnline: update.isOnline,
+            activeSession: update.activeSession,
+          };
+        } else {
+          // Friend still not in the list — keep it pending (unlikely but safe)
+          remainingPending.push(update);
+        }
+      });
+
+      return { friends: newFriends, pendingPresenceUpdates: remainingPending };
     }),
   updateFriendPresence: (id, isOnline, activeSession) =>
     set((state) => {
       const friend = state.friends[id];
-      if (!friend) return state;
+      if (!friend) {
+        // Friend not loaded yet — buffer the update for replay when setFriends runs
+        const alreadyBuffered = state.pendingPresenceUpdates.findIndex(p => p.id === id);
+        const newPending = [...state.pendingPresenceUpdates];
+        const update = { id, isOnline, activeSession };
+        if (alreadyBuffered >= 0) {
+          newPending[alreadyBuffered] = update; // Replace with latest
+        } else {
+          newPending.push(update);
+        }
+        return { pendingPresenceUpdates: newPending };
+      }
       return {
         friends: {
           ...state.friends,

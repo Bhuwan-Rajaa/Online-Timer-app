@@ -136,9 +136,26 @@ export const useSocket = () => {
       });
     });
 
-    socket.on('nudge_received', () => {
+    socket.on('nudge_received', (data: any) => {
+      // Screen shake effect
       document.body.classList.add('animate-shake');
       setTimeout(() => document.body.classList.remove('animate-shake'), 500);
+
+      // Border flash effect
+      document.body.classList.add('nudge-flash');
+      setTimeout(() => document.body.classList.remove('nudge-flash'), 1000);
+
+      // Show a toast notification with the sender's name
+      const senderId = data?.sender_id;
+      const friend = senderId ? useNetworkStore.getState().friends[senderId] : null;
+      const senderName = friend?.username || 'Someone';
+      useNetworkStore.getState().addMessage({
+        id: `nudge-${Date.now()}`,
+        senderId: senderId || 'system',
+        senderName,
+        text: `👊 ${senderName} nudged you!`,
+        timestamp: Date.now()
+      });
     });
 
     socket.on('friend_request_received', () => {

@@ -21,6 +21,8 @@ export const Hub = () => {
   const navigate = useNavigate();
 
   const [messageInput, setMessageInput] = useState<Record<string, string>>({});
+  const [nudgeCooldown, setNudgeCooldown] = useState<Record<string, boolean>>({});
+  const [messageSent, setMessageSent] = useState<Record<string, boolean>>({});
   const [friendUsername, setFriendUsername] = useState('');
   const [searchResults, setSearchResults] = useState<{id: string, username: string}[]>([]);
   const [addFriendMessage, setAddFriendMessage] = useState('');
@@ -198,7 +200,13 @@ export const Hub = () => {
   };
 
   const handleNudge = (targetUserId: string) => {
+    if (nudgeCooldown[targetUserId]) return;
     socket.emit('send_nudge', { target_user_id: targetUserId });
+    // Set cooldown to prevent spam and show feedback
+    setNudgeCooldown(prev => ({ ...prev, [targetUserId]: true }));
+    setTimeout(() => {
+      setNudgeCooldown(prev => ({ ...prev, [targetUserId]: false }));
+    }, 2000);
   };
 
   const handleSendMessage = (targetUserId: string) => {
@@ -206,7 +214,23 @@ export const Hub = () => {
     if (!text || text.trim() === '') return;
     
     socket.emit('send_ephemeral_message', { target_user_id: targetUserId, message: text });
+    
+    // Show the sender their own message as confirmation
+    const targetFriend = friends[targetUserId];
+    useNetworkStore.getState().addMessage({
+      id: `sent-${Date.now()}`,
+      senderId: userId || 'me',
+      senderName: 'You',
+      text: `→ @${targetFriend?.username || 'friend'}: ${text}`,
+      timestamp: Date.now()
+    });
+    
     setMessageInput(prev => ({ ...prev, [targetUserId]: '' }));
+    // Brief "Sent" indicator
+    setMessageSent(prev => ({ ...prev, [targetUserId]: true }));
+    setTimeout(() => {
+      setMessageSent(prev => ({ ...prev, [targetUserId]: false }));
+    }, 1500);
   };
 
   // Auto-remove messages after 5 minutes
@@ -355,10 +379,21 @@ export const Hub = () => {
                 </div>
                 <button 
                   onClick={() => handleNudge(friend.id)}
+                  disabled={!friend.isOnline || nudgeCooldown[friend.id]}
                   className="glass-button"
-                  style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem' }}
+                  style={{ 
+                    padding: '0.25rem 0.5rem', 
+                    borderRadius: '4px', 
+                    fontSize: '0.75rem',
+                    opacity: friend.isOnline && !nudgeCooldown[friend.id] ? 1 : 0.5,
+                    cursor: friend.isOnline && !nudgeCooldown[friend.id] ? 'pointer' : 'not-allowed',
+                    background: nudgeCooldown[friend.id] ? 'rgba(6, 214, 160, 0.2)' : undefined,
+                    borderColor: nudgeCooldown[friend.id] ? 'rgba(6, 214, 160, 0.4)' : undefined,
+                    transition: 'all 0.3s ease'
+                  }}
+                  title={friend.isOnline ? 'Send a nudge' : 'Friend is offline'}
                 >
-                  Nudge
+                  {nudgeCooldown[friend.id] ? '✓ Nudged!' : '👊 Nudge'}
                 </button>
               </div>
               
@@ -376,23 +411,41 @@ export const Hub = () => {
               )}
               
               {/* Quick Message Input for this friend */}
-              <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(friend.id); }} style={{ marginTop: '1rem' }}>
+              <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(friend.id); }} style={{ marginTop: '1rem', position: 'relative' }}>
                 <input
                   type="text"
-                  placeholder={`> msg @${friend.username}`}
+                  disabled={!friend.isOnline}
+                  placeholder={friend.isOnline ? `> msg @${friend.username}` : 'Offline - Cannot send messages'}
                   value={messageInput[friend.id] || ''}
                   onChange={(e) => setMessageInput(prev => ({ ...prev, [friend.id]: e.target.value }))}
                   style={{
                     width: '100%',
                     background: 'rgba(0,0,0,0.2)',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    border: messageSent[friend.id] ? '1px solid var(--success)' : '1px solid rgba(255,255,255,0.1)',
                     borderRadius: '4px',
                     padding: '0.5rem',
                     color: 'var(--text-primary)',
                     fontSize: '0.875rem',
-                    fontFamily: 'var(--font-mono)'
+                    fontFamily: 'var(--font-mono)',
+                    opacity: friend.isOnline ? 1 : 0.5,
+                    cursor: friend.isOnline ? 'text' : 'not-allowed',
+                    transition: 'border-color 0.3s ease'
                   }}
                 />
+                {messageSent[friend.id] && (
+                  <span style={{
+                    position: 'absolute',
+                    right: '0.5rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    fontSize: '0.7rem',
+                    color: 'var(--success)',
+                    fontWeight: 600,
+                    letterSpacing: '0.5px'
+                  }}>
+                    Sent ✓
+                  </span>
+                )}
               </form>
             </div>
           ))}

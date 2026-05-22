@@ -30,6 +30,7 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 interface AuthenticatedSocket extends Socket {
   user?: any;
+  token?: string;
 }
 
 // In-memory mapping to store active timers.
@@ -41,22 +42,12 @@ io.on('connection', (socket: AuthenticatedSocket) => {
 
   socket.on('authenticate', async (token: string, callback) => {
     try {
-      let user: any = null;
-      
-      if (process.env.SUPABASE_JWT_SECRET) {
-        // Fast, local verification
-        const decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET) as any;
-        // JWT from Supabase contains sub as user_id
-        user = { id: decoded.sub };
-      } else {
-        // Fallback to network request if secret isn't provided
-        console.warn('SUPABASE_JWT_SECRET not provided, falling back to network auth verification.');
-        const { data, error } = await supabase.auth.getUser(token);
-        if (error || !data.user) throw new Error(error?.message || 'Invalid user');
-        user = data.user;
-      }
+      const { data, error } = await supabase.auth.getUser(token);
+      if (error || !data.user) throw new Error(error?.message || 'Invalid user');
+      const user = data.user;
       
       socket.user = user;
+      socket.token = token;
       socket.join(`user_${user.id}`); // private room for direct messages/nudges
       
       const currentCount = onlineUsers.get(user.id) || 0;
@@ -76,6 +67,7 @@ io.on('connection', (socket: AuthenticatedSocket) => {
   socket.on('join_network', (friendIds: string[]) => {
     if (!socket.user) return;
     const myId = socket.user.id;
+    console.log(`[join_network] User ${myId} is joining network rooms for:`, friendIds);
 
     // Subscribe to friends' presence updates
     friendIds.forEach(id => {
@@ -83,6 +75,7 @@ io.on('connection', (socket: AuthenticatedSocket) => {
       // Immediately push back the friend's current state to this socket
       const activeTimer = activeTimers.get(id);
       const isOnline = onlineUsers.has(id);
+      console.log(`[join_network] Checking friend ${id}: isOnline=${isOnline}, activeTimer=${!!activeTimer}`);
 
       if (activeTimer) {
         socket.emit('friend_presence_update', activeTimer);
@@ -142,7 +135,12 @@ io.on('connection', (socket: AuthenticatedSocket) => {
       const durationSeconds = Math.floor((Date.now() - startTime) / 1000);
       
       try {
-        await supabase.from('Sessions').insert({
+        const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+          global: {
+            headers: { Authorization: `Bearer ${socket.token}` }
+          }
+        });
+        await userClient.from('Sessions').insert({
           user_id: socket.user.id,
           topic: activeTimer.topic,
           timer_type: activeTimer.timer_type,
@@ -164,6 +162,7 @@ io.on('connection', (socket: AuthenticatedSocket) => {
 
   socket.on('send_ephemeral_message', ({ target_user_id, message }) => {
     if (!socket.user) return;
+    console.log(`[send_ephemeral_message] ${socket.user.id} -> ${target_user_id}: ${message}`);
     io.to(`user_${target_user_id}`).emit('receive_ephemeral_message', {
       sender_id: socket.user.id,
       message
@@ -172,6 +171,7 @@ io.on('connection', (socket: AuthenticatedSocket) => {
 
   socket.on('send_nudge', ({ target_user_id }) => {
     if (!socket.user) return;
+    console.log(`[send_nudge] ${socket.user.id} -> ${target_user_id}`);
     io.to(`user_${target_user_id}`).emit('nudge_received', {
       sender_id: socket.user.id
     });
@@ -204,12 +204,18 @@ io.on('connection', (socket: AuthenticatedSocket) => {
         const durationSeconds = Math.floor((Date.now() - startTime) / 1000);
         
         try {
-          await supabase.from('Sessions').insert({
+          const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+            global: {
+              headers: { Authorization: `Bearer ${socket.token}` }
+            }
+          });
+          await userClient.from('Sessions').insert({
             user_id: socket.user.id,
             topic: activeTimer.topic,
             timer_type: activeTimer.timer_type,
             duration_seconds: durationSeconds
           });
+          console.log(`Saved session on disconnect for ${socket.user.id}: ${durationSeconds}s`);
         } catch (err) {
           console.error('Failed to save session on disconnect:', err);
         }
