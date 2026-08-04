@@ -778,13 +778,5 @@ npm run dev  # Starts on port 5173
 
 ---
 
-## 11. Future Roadmap
-
-- [ ] **Q2 2024**: Phase 1 - Android APK beta
-- [ ] **Q3 2024**: Phase 2 - Web frontend + social features
-- [ ] **Q4 2024**: Phase 3 - iOS App Store release, HealthKit integration
-- [ ] **2025**: Voice chat, study groups, achievements, export data
-
----
 
 **For questions or contributions**: https://github.com/Bhuwan-Rajaa/Online-Timer-app
