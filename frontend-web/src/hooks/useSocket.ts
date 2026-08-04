@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { socket } from '../lib/socket';
 import { useStore } from '../store/useStore';
 import { useNetworkStore } from '../store/useNetworkStore';
@@ -9,11 +9,13 @@ export const useSocket = () => {
   const { updateFriendPresence } = useNetworkStore();
   // Keep a ref to the latest friend IDs so the socket connect handler can use them
   const friendIdsRef = useRef<string[]>([]);
+  // Guard against double-init from React strict mode
+  const initPromiseRef = useRef<Promise<string[]> | null>(null);
 
   // ─── Step 1: Load friends from Supabase immediately (no socket needed) ───────
   // This runs as soon as the user is known, independently of socket status.
   // This is why friends show on mobile even when the Render backend is cold.
-  const loadFriendsFromDB = async (userId: string) => {
+  const loadFriendsFromDB = useCallback(async (userId: string): Promise<string[]> => {
     try {
       const { data: friendships } = await supabase
         .from('Friendships')
@@ -67,14 +69,15 @@ export const useSocket = () => {
       console.error('Failed to load friends from DB:', e);
       return [];
     }
-  };
+  }, []);
 
   // ─── Step 2: Tell the socket server which friend rooms to join ───────────────
-  const joinSocketNetwork = (friendIds: string[]) => {
-    if (socket.connected) {
+  const joinSocketNetwork = useCallback((friendIds: string[]) => {
+    if (socket.connected && friendIds.length > 0) {
+      console.log('[joinSocketNetwork] Emitting join_network with', friendIds.length, 'friends');
       socket.emit('join_network', friendIds);
     }
-  };
+  }, []);
 
   // Expose a combined refetch for Hub.tsx to call after accepting a friend request
   useEffect(() => {
@@ -84,13 +87,7 @@ export const useSocket = () => {
         joinSocketNetwork(ids);
       }
     };
-  }, [user]);
-
-  // ─── Load friends immediately when user is known ─────────────────────────────
-  useEffect(() => {
-    if (!user) return;
-    loadFriendsFromDB(user.id);
-  }, [user]);
+  }, [user, loadFriendsFromDB, joinSocketNetwork]);
 
   // ─── Socket setup ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -106,6 +103,7 @@ export const useSocket = () => {
     socket.off('friend_request_received');
 
     socket.on('friend_presence_update', (data: any) => {
+      console.log('[friend_presence_update] Received:', data);
       if (data.stopped) {
         const isOnline = useNetworkStore.getState().friends[data.userId]?.isOnline ?? true;
         updateFriendPresence(data.userId, isOnline, undefined);
@@ -178,24 +176,17 @@ export const useSocket = () => {
       socket.emit('authenticate', session.access_token, async (response: any) => {
         if (response?.success) {
           console.log('Socket authenticated successfully');
-          // Use already-loaded friend IDs from the ref (avoids re-querying DB)
-          // But if ref is empty, load again (e.g. cold reconnect)
+          // ALWAYS ensure friends are loaded before joining the network.
+          // This prevents the race where join_network fires into an empty store.
           let ids = friendIdsRef.current;
           if (ids.length === 0) {
+            // No friends loaded yet — load and wait
             ids = await loadFriendsFromDB(user.id);
           }
+          // Small delay to ensure any in-flight setFriends() from the parallel
+          // DB load has flushed to the Zustand store before server responses arrive
+          await new Promise(resolve => setTimeout(resolve, 50));
           joinSocketNetwork(ids);
-
-          // Recover active timer state after reconnect
-          const localSession = useStore.getState().localSession;
-          if (localSession?.isActive) {
-            socket.emit('start_timer', {
-              topic: localSession.topic,
-              timer_type: localSession.type,
-              start_time_iso: new Date(localSession.startTime).toISOString(),
-              duration_target: localSession.targetDuration
-            });
-          }
         } else {
           console.error('Socket authentication failed:', response?.error);
         }
@@ -210,13 +201,52 @@ export const useSocket = () => {
       console.log('Socket disconnected:', reason);
     });
 
-    if (!socket.connected) {
-      socket.connect();
+    // Coordinated init: load friends from DB first, then connect socket
+    if (!initPromiseRef.current) {
+      initPromiseRef.current = loadFriendsFromDB(user.id).then(ids => {
+        friendIdsRef.current = ids;
+        if (!socket.connected) {
+          socket.connect();
+        } else {
+          handleConnect();
+        }
+        return ids;
+      });
     } else {
-      handleConnect();
+      // Already initializing, just ensure socket connects
+      initPromiseRef.current.then(() => {
+        if (!socket.connected) {
+          socket.connect();
+        } else {
+          handleConnect();
+        }
+      });
     }
 
+    // ─── Periodic Presence Re-Sync ──────────────────────────────────────────────
+    // Every 30 seconds, re-join the network to get fresh presence from the server.
+    // This catches any missed updates due to network blips or server restarts.
+    const presenceSyncInterval = setInterval(() => {
+      if (socket.connected && friendIdsRef.current.length > 0) {
+        console.log('[presenceSync] Periodic re-join for fresh presence');
+        // First, set all friends to offline so we get accurate state from server
+        // NO - don't reset, just re-join and let server tell us who's online.
+        // The server only sends updates for online users, so offline friends stay as-is.
+        // But we need to reset offline state for friends who may have disconnected silently.
+        const currentFriends = useNetworkStore.getState().friends;
+        Object.keys(currentFriends).forEach(id => {
+          if (currentFriends[id].isOnline && !currentFriends[id].activeSession) {
+            // Mark idle-online friends as offline; server will re-confirm if still online
+            updateFriendPresence(id, false, undefined);
+          }
+        });
+        socket.emit('join_network', friendIdsRef.current);
+      }
+    }, 30000);
+
     return () => {
+      clearInterval(presenceSyncInterval);
+      initPromiseRef.current = null;
       socket.off('connect', handleConnect);
       socket.off('disconnect');
       socket.off('friend_presence_update');
@@ -224,5 +254,5 @@ export const useSocket = () => {
       socket.off('nudge_received');
       socket.off('friend_request_received');
     };
-  }, [user]);
+  }, [user, loadFriendsFromDB, joinSocketNetwork, updateFriendPresence]);
 };

@@ -28,6 +28,21 @@ export const Hub = () => {
   const [addFriendMessage, setAddFriendMessage] = useState('');
   const [pendingRequests, setPendingRequests] = useState<any[]>([]); // incoming
   const [outgoingRequests, setOutgoingRequests] = useState<any[]>([]); // sent by me
+  const [isConnected, setIsConnected] = useState(socket.connected);
+
+  // Track socket connection state for the Live/Offline indicator
+  useEffect(() => {
+    const onConnect = () => setIsConnected(true);
+    const onDisconnect = () => setIsConnected(false);
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    // Sync initial state in case it changed before this effect ran
+    setIsConnected(socket.connected);
+    return () => {
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+    };
+  }, []);
 
   const userId = user?.id;
 
@@ -350,7 +365,26 @@ export const Hub = () => {
       </div>
 
       <div style={{ marginBottom: '2rem' }}>
-        <h2 style={{ fontSize: '1.25rem', marginBottom: '1rem', color: 'var(--text-secondary)' }}>Friends</h2>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <h2 style={{ fontSize: '1.25rem', color: 'var(--text-secondary)' }}>Friends</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+              {isConnected ? '🟢 Live' : '🔴 Offline'}
+            </span>
+            <button 
+              onClick={() => {
+                if ((window as any).__refetchFriends) {
+                  (window as any).__refetchFriends();
+                }
+              }}
+              className="glass-button"
+              style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+              title="Force refresh network presence"
+            >
+              ↻ Sync
+            </button>
+          </div>
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.5rem' }}>
           {/* Empty state — only show if no friends */}
           {friendsList.length === 0 && (

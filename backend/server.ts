@@ -10,6 +10,7 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -36,6 +37,15 @@ interface AuthenticatedSocket extends Socket {
 // In-memory mapping to store active timers.
 const activeTimers = new Map<string, any>(); // userId -> timerPayload
 const onlineUsers = new Map<string, number>(); // userId -> connection count
+
+// Debug endpoint to inspect in-memory state (dev only)
+app.get('/debug/state', (_req, res) => {
+  res.json({
+    onlineUsers: Object.fromEntries(onlineUsers),
+    activeTimers: Object.fromEntries(activeTimers),
+    connectedSockets: io.sockets.sockets.size,
+  });
+});
 
 io.on('connection', (socket: AuthenticatedSocket) => {
   console.log('New connection:', socket.id);
