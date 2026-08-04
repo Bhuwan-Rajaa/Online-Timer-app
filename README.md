@@ -19,13 +19,6 @@ The **Multiplayer Study Timer App** is a subscription-free, real-time collaborat
 ### 1.1 Mission
 Provide a subscription-free, distraction-free study companion that leverages social motivation through presence awareness, without the toxicity of intrusive notifications or analytics tracking.
 
-### 1.2 Target Platforms & Release Timeline
-
-| Phase | Platform | Status | Timeline |
-|-------|----------|--------|----------|
-| **Phase 1** | Android APK (Expo) | 🔄 In Development | Q2 2024 |
-| **Phase 2** | Web (React) | 🔄 In Development | Q3 2024 |
-| **Phase 3** | iOS App Store | 📋 Planned | Q4 2024 |
 
 ### 1.3 Core Principles
 - **Zero Persistence for Real-Time**: All presence and ephemeral messages live in-memory only
@@ -183,10 +176,10 @@ This server strictly handles live presence and ephemeral messaging. It operates 
 
 The app has **two independent frontend codebases**:
 
-| Platform | Framework | Location | Status | Deployment |
-|----------|-----------|----------|--------|------------|
-| **Mobile (Android/iOS)** | React Native + Expo + TypeScript | `frontend/` | 🔄 Phase 1 | EAS Build → APK |
-| **Web (Desktop/Tablet)** | React + Vite + React Router | `frontend-web/` | 🔄 Phase 2 | Vercel |
+| Platform | Framework | Location | Deployment |
+|----------|-----------|----------|------------|
+| **Mobile (Android/iOS)** | React Native + Expo + TypeScript | `frontend/` | EAS Build → APK |
+| **Web (Desktop/Tablet)** | React + Vite + React Router | `frontend-web/` | Vercel |
 
 Both share similar architecture (Zustand stores, Socket.IO client) but differ in UI components and platform-specific features.
 
@@ -735,14 +728,14 @@ npm run dev  # Starts on port 5173
 ### 9.1 Real-Time Scalability
 
 - **Single-Instance**: Handles ~100 concurrent connections comfortably
-- **Horizontal Scaling**: Multiple Socket.IO instances + Redis adapter (future)
+- **Horizontal Scaling**: Multiple Socket.IO instances + Redis adapter
 - **In-Memory State**: O(1) lookup for active timers, no database queries
 
 ### 9.2 Database Scalability
 
 - **Supabase Free**: 50GB storage, 2 concurrent connections, unlimited API requests (rate-limited)
 - **Indexes**: Composite index on `(user_id, timestamp)` prevents full table scans
-- **Archive Strategy** (future): Move sessions >1 year old to cold storage
+- **Archive Strategy**: Move sessions >1 year old to cold storage
 
 ### 9.3 Frontend Performance
 
